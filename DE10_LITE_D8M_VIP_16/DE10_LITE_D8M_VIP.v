@@ -190,7 +190,7 @@ FpsMonitor uFps(
 	.hex_fps_h(HEX1),
 	.hex_fps_l(HEX0)
 );
-
+//FPGA_UART fuart(.clk(MAX10_CLK1_50),.rst_n(),.uart_rx(ARDUINO_IO[1]),.uart_tx(ARDUINO_IO[0]));
 assign  HEX2 = 7'h7F;
 assign  HEX3 = 7'h7F;
 assign  HEX4 = 7'h7F;

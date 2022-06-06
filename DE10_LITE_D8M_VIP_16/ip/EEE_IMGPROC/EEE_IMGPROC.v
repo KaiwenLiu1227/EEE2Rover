@@ -68,7 +68,7 @@ parameter IMAGE_H = 11'd480;
 parameter MESSAGE_BUF_MAX = 256;
 parameter MSG_INTERVAL = 6;
 parameter BB_COL_DEFAULT = 24'h00ff00;
-
+parameter CENTER_COL_DEFAULT=24'h0000ff;
 
 wire [7:0]   red, green, blue, grey;
 wire [7:0]   red_out, green_out, blue_out;
@@ -77,21 +77,39 @@ wire         sop, eop, in_valid, out_ready;
 ////////////////////////////////////////////////////////////////////////
 
 // Detect red areas
-wire red_detect;
+wire red_detect,blue_detect,color_detect;
 assign red_detect = red[7] & ~green[7] & ~blue[7];
+// assign blue_detect = ~red[7] & ~green[7] & blue[7];
+// assign purple_detect = red[7] & ~green[7] & blue[7];
+// assign yellow_detect = red[7] & green[7] & ~blue[7];
+// assign black_detect = ~red[7] & ~green[7] & ~blue[7];
+// assign white_detect = red[7] & green[7] & blue[7];
+// assign cyan_detect = ~red[7] & green[7] & blue[7];
 
+wire [2:0] detected_color;
+wire [8:0]h;
+wire [7:0]s;
+wire [7:0]v;
+
+assign blue_detect = (h>=9'd200 & h<=9'd250)&s>=8'd43&v>=8'd50;
+
+assign color_detect=blue_detect;
 // Find boundary of cursor box
 
 // Highlight detected areas
 wire [23:0] red_high;
 assign grey = green[7:1] + red[7:2] + blue[7:2]; //Grey = green/2 + red/4 + blue/4
-assign red_high  =  red_detect ? {8'hff, 8'h0, 8'h0} : {grey, grey, grey};
+// assign red_high  =  red_detect ? {8'hff, 8'h0, 8'h0} : {grey, grey, grey};
+assign red_high  =  color_detect ? {8'hff, 8'h0, 8'h0} : {grey, grey, grey};
 
 // Show bounding box
 wire [23:0] new_image;
 wire bb_active;
-assign bb_active = (x == left) | (x == right) | (y == top) | (y == bottom);
-assign new_image = bb_active ? bb_col : red_high;
+wire center_active;
+assign bb_active = (x == left) | (x == right) | (y == top) | (y == bottom) ;
+assign center_active= (x==center_x) | (y==center_y);
+
+assign new_image = is_color_valid ? (center_active ? center_col : (bb_active ? bb_col : red_high)) : red_high;
 
 // Switch output pixels depending on mode switch
 // Don't modify the start-of-packet word - it's a packet discriptor
@@ -99,67 +117,102 @@ assign new_image = bb_active ? bb_col : red_high;
 assign {red_out, green_out, blue_out} = (mode & ~sop & packet_video) ? new_image : {red,green,blue};
 
 //Count valid pixels to tget the image coordinates. Reset and detect packet type on Start of Packet.
-reg [10:0] x, y;
+reg [9:0] x, y;
+reg [18:0] xy_cnt;
+reg [31:0] x_increment,y_increment;
 reg packet_video;
 always@(posedge clk) begin
 	if (sop) begin
-		x <= 11'h0;
-		y <= 11'h0;
+		x <= 10'h0;
+		y <= 10'h0;
 		packet_video <= (blue[3:0] == 3'h0);
 	end
 	else if (in_valid) begin
 		if (x == IMAGE_W-1) begin
-			x <= 11'h0;
-			y <= y + 11'h1;
+			x <= 10'h0;
+			y <= y + 10'h1;
 		end
 		else begin
-			x <= x + 11'h1;
+			x <= x + 10'h1;
 		end
 	end
 end
 
 //Find first and last red pixels
-reg [10:0] x_min, y_min, x_max, y_max;
+
+
+
+
+
+reg [9:0] x_min, y_min, x_max, y_max;
 always@(posedge clk) begin
-	if (red_detect & in_valid) begin	//Update bounds when the pixel is red
+	// if (red_detect & in_valid) begin	//Update bounds when the pixel is red
+	// 	if (x < x_min) x_min <= x;
+	// 	if (x > x_max) x_max <= x;
+	// 	if (y < y_min) y_min <= y;
+	// 	y_max <= y;
+	// end
+	if (color_detect & in_valid) begin	//Update bounds when the pixel is red
 		if (x < x_min) x_min <= x;
 		if (x > x_max) x_max <= x;
 		if (y < y_min) y_min <= y;
 		y_max <= y;
+		x_increment<=x_increment+x;
+		y_increment<=y_increment+y;
+		xy_cnt<=xy_cnt+1;
 	end
 	if (sop & in_valid) begin	//Reset bounds on start of packet
-		x_min <= IMAGE_W-11'h1;
+		x_min <= IMAGE_W-10'h1;
 		x_max <= 0;
-		y_min <= IMAGE_H-11'h1;
+		y_min <= IMAGE_H-10'h1;
 		y_max <= 0;
+		x_increment<=0;
+		y_increment<=0;
+		xy_cnt<=0;
 	end
 end
 
 //Process bounding box at the end of the frame.
-reg [1:0] msg_state;
-reg [10:0] left, right, top, bottom;
+reg [4:0] msg_state;
+reg [9:0] left, right, top, bottom,center_x,center_y;
 reg [7:0] frame_count;
+reg is_color_valid=1;
 always@(posedge clk) begin
 	if (eop & in_valid & packet_video) begin  //Ignore non-video packets
 		
 		//Latch edges for display overlay on next frame
-		left <= x_min;
-		right <= x_max;
-		top <= y_min;
-		bottom <= y_max;
+		if(xy_cnt<=200) begin
+			is_color_valid<=0;
+			left <= 0;
+			right <= 0;
+			top <= 0;
+			bottom <= 0;
+			center_x<=0;
+			center_y<=0;
+		end
+		else begin
+			is_color_valid<=1;
+			left <= x_min;
+			right <= x_max;
+			top <= y_min;
+			bottom <= y_max;
+			center_x<=x_increment/xy_cnt;
+			center_y<=y_increment/xy_cnt;
+		end
 		
 		
 		//Start message writer FSM once every MSG_INTERVAL frames, if there is room in the FIFO
 		frame_count <= frame_count - 1;
 		
 		if (frame_count == 0 && msg_buf_size < MESSAGE_BUF_MAX - 3) begin
-			msg_state <= 2'b01;
+			msg_state <= 1;
 			frame_count <= MSG_INTERVAL-1;
 		end
 	end
 	
 	//Cycle through message writer states once started
-	if (msg_state != 2'b00) msg_state <= msg_state + 2'b01;
+	if (msg_state != 0) msg_state <= msg_state + 1;
+	else if(msg_state>=5) msg_state <=0;
 
 end
 	
@@ -171,28 +224,66 @@ wire msg_buf_rd, msg_buf_flush;
 wire [7:0] msg_buf_size;
 wire msg_buf_empty;
 
+parameter  BLACK_CODE = 3'b000;
+parameter  WHITE_CODE = 3'b111;
+parameter  RED_CODE = 3'b100;
+parameter  BLUE_CODE = 3'b001;
+parameter YELLOW_CODE=  3'b110;
+parameter  PURPLE_CODE = 3'b101;
+
 `define RED_BOX_MSG_ID "RBB"
+
+// COLOR 3 COLOR 3 XYCNT 18 = 24
+// X_C 10 Y_C 10 X_TOP 10 32
+// BOT 10 LEFT 10 RIGHT 10 32 
 
 always@(*) begin	//Write words to FIFO as state machine advances
 	case(msg_state)
-		2'b00: begin
+		0: begin
 			msg_buf_in = 32'b0;
 			msg_buf_wr = 1'b0;
 		end
-		2'b01: begin
-			msg_buf_in = `RED_BOX_MSG_ID;	//Message ID
+		1: begin
+			msg_buf_in = 32'b11111111111111111111111111111111;	//Message ID
 			msg_buf_wr = 1'b1;
 		end
-		2'b10: begin
-			msg_buf_in = {5'b0, x_min, 5'b0, y_min};	//Top left coordinate
+		2: begin
+			msg_buf_in = {RED_CODE,1'b0,RED_CODE,1'b0,xy_cnt,5'b0};
 			msg_buf_wr = 1'b1;
 		end
-		2'b11: begin
-			msg_buf_in = {5'b0, x_max, 5'b0, y_max}; //Bottom right coordinate
+		3: begin
+			msg_buf_in = {center_x,1'b0,center_y,1'b0,top};	//Top left coordinate
 			msg_buf_wr = 1'b1;
 		end
+		4: begin
+			msg_buf_in = {bottom,1'b0,left,1'b0,right}; //Bottom right coordinate
+			msg_buf_wr = 1'b1;
+		end
+		// 4: begin
+		// 	msg_buf_in = {5'b0, x_max, 5'b0, y_max}; //Bottom right coordinate
+		// 	msg_buf_wr = 1'b1;
+		// end
+		// 5: begin
+		// 	msg_buf_in = {5'b0, x_max, 5'b0, y_max}; //Bottom right coordinate
+		// 	msg_buf_wr = 1'b1;
+		// end
 	endcase
 end
+
+COLOR_DETECT COLOR_DETECT_module(
+	  .rgb_r(red),
+  .rgb_g(green),
+  .rgb_b(blue),
+	.color(detected_color),
+);
+
+RGB2HSV RGB2HSV_module(
+  .rgb_r(red),
+  .rgb_g(green),
+  .rgb_b(blue),
+  .hsv_h(h),
+  .hsv_s(s),
+  .hsv_v(v));
 
 
 //Output message FIFO
@@ -253,7 +344,7 @@ STREAM_REG #(.DATA_WIDTH(26)) out_reg (
 // Process write
 
 reg  [7:0]   reg_status;
-reg	[23:0]	bb_col;
+reg	[23:0]	bb_col,center_col;
 
 always @ (posedge clk)
 begin
@@ -261,6 +352,7 @@ begin
 	begin
 		reg_status <= 8'b0;
 		bb_col <= BB_COL_DEFAULT;
+		center_col<=CENTER_COL_DEFAULT;
 	end
 	else begin
 		if(s_chipselect & s_write) begin

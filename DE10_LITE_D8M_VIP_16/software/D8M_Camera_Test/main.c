@@ -1,6 +1,10 @@
 
-
 #include <stdio.h>
+#include "unistd.h"
+#include "system.h"
+#include "alt_types.h"
+#include "altera_avalon_uart_regs.h"
+#include "sys\alt_irq.h"
 #include "I2C_core.h"
 #include "terasic_includes.h"
 #include "mipi_camera_config.h"
@@ -11,8 +15,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-//EEE_IMGPROC defines
-#define EEE_IMGPROC_MSG_START ('R'<<16 | 'B'<<8 | 'B')
+#define EEE_IMGPROC_MSG_START 0xFFFFFFFF
 
 //offsets
 #define EEE_IMGPROC_STATUS 0
@@ -20,7 +23,7 @@
 #define EEE_IMGPROC_ID 2
 #define EEE_IMGPROC_BBCOL 3
 
-#define EXPOSURE_INIT 0x002000
+#define EXPOSURE_INIT 0xFF0000
 #define EXPOSURE_STEP 0x100
 #define GAIN_INIT 0x080
 #define GAIN_STEP 0x040
@@ -39,6 +42,8 @@
 #define MIPI_REG_FrmErrCnt		0x0080
 #define MIPI_REG_MDLErrCnt		0x0090
 
+alt_u8 txdata=5;
+alt_u8 rxdata=0;
 void mipi_clear_error(void){
 	MipiBridgeRegWrite(MIPI_REG_CSIStatus,0x01FF); // clear error
 	MipiBridgeRegWrite(MIPI_REG_MDLSynErr,0x0000); // clear error
@@ -116,196 +121,236 @@ bool MIPI_Init(void){
 	return bSuccess;
 }
 
+//UART中断服务函数
+void IRQ_UART_Interrupts(){
+ rxdata = IORD_ALTERA_AVALON_UART_RXDATA(UART_0_BASE);//将rxdata寄存器中存储的值读入变量rxdata中
+ txdata = rxdata;//串口自收发，将变量rxdata的值赋给txdata
+ while(!(IORD_ALTERA_AVALON_UART_STATUS(UART_0_BASE)& ALTERA_AVALON_UART_STATUS_TRDY_MSK));
+ //查询发送准备接收信号，如果没有准备好，则等待
+ IOWR_ALTERA_AVALON_UART_TXDATA(UART_0_BASE,txdata);//发送准备好，发送txdata
+}
 
+//中断初始化函数
+void IRQ_init()
+{
+ //清除状态寄存器
+ IOWR_ALTERA_AVALON_UART_STATUS(UART_0_BASE, 0);
+ //使能接收准备中断，给控制寄存器相应位写1
+ IORD_ALTERA_AVALON_UART_CONTROL(UART_0_BASE);
 
+// alt_ic_isr_register(
+//		 UART_0_IRQ_INTERRUPT_CONTROLLER_ID,//注册ISR
+//		 UART_0_IRQ,//中断控制器标号，从system.h复制
+//   IRQ_UART_Interrupts,//UART中断服务函数
+//   0x0,//指向与设备驱动实例相关的数据结构体
+//   0x0);//flags，保留未用
+}
 
 int main()
 {
+//  int i = 0;
+//  while(1){
+//	  i++;
+//	  while(!(IORD_ALTERA_AVALON_UART_STATUS(UART_0_BASE)& ALTERA_AVALON_UART_STATUS_TRDY_MSK));
+//	   //查询发送准备接收信号，如果没有准备好，则等待
+//	   IOWR_ALTERA_AVALON_UART_TXDATA(UART_0_BASE,i);//发送准备好，发送txdata
+//	   usleep(2000000);
+//  }
+  fcntl(STDIN_FILENO, F_SETFL, O_NONBLOCK);
 
-	fcntl(STDIN_FILENO, F_SETFL, O_NONBLOCK);
+    printf("DE10-LITE D8M VGA Demo\n");
+    printf("Imperial College EEE2 Project version\n");
+    IOWR(MIPI_PWDN_N_BASE, 0x00, 0x00);
+    IOWR(MIPI_RESET_N_BASE, 0x00, 0x00);
 
-  printf("DE10-LITE D8M VGA Demo\n");
-  printf("Imperial College EEE2 Project version\n");
-  IOWR(MIPI_PWDN_N_BASE, 0x00, 0x00);
-  IOWR(MIPI_RESET_N_BASE, 0x00, 0x00);
+    usleep(2000);
+    IOWR(MIPI_PWDN_N_BASE, 0x00, 0xFF);
+    usleep(2000);
+    IOWR(MIPI_RESET_N_BASE, 0x00, 0xFF);
 
-  usleep(2000);
-  IOWR(MIPI_PWDN_N_BASE, 0x00, 0xFF);
-  usleep(2000);
-  IOWR(MIPI_RESET_N_BASE, 0x00, 0xFF);
-
-  printf("Image Processor ID: %x\n",IORD(0x42000,EEE_IMGPROC_ID));
-  //printf("Image Processor ID: %x\n",IORD(EEE_IMGPROC_0_BASE,EEE_IMGPROC_ID)); //Don't know why this doesn't work - definition is in system.h in BSP
-
-
-  usleep(2000);
-
-
-  // MIPI Init
-   if (!MIPI_Init()){
-	  printf("MIPI_Init Init failed!\r\n");
-  }else{
-	  printf("MIPI_Init Init successfully!\r\n");
-  }
-
-//   while(1){
- 	    mipi_clear_error();
-	 	usleep(50*1000);
- 	    mipi_clear_error();
-	 	usleep(1000*1000);
-	    mipi_show_error_info();
-//	    mipi_show_error_info_more();
-	    printf("\n");
-//   }
+    printf("Image Processor ID: %x\n",IORD(0x42000,EEE_IMGPROC_ID));
+    //printf("Image Processor ID: %x\n",IORD(EEE_IMGPROC_0_BASE,EEE_IMGPROC_ID)); //Don't know why this doesn't work - definition is in system.h in BSP
 
 
-#if 0  // focus sweep
-	    printf("\nFocus sweep\n");
- 	 	alt_u16 ii= 350;
- 	    alt_u8  dir = 0;
- 	 	while(1){
- 	 		if(ii< 50) dir = 1;
- 	 		else if (ii> 1000) dir =0;
-
- 	 		if(dir) ii += 20;
- 	 		else    ii -= 20;
-
- 	    	printf("%d\n",ii);
- 	     OV8865_FOCUS_Move_to(ii);
- 	     usleep(50*1000);
- 	    }
-#endif
+    usleep(2000);
 
 
+    // MIPI Init
+     if (!MIPI_Init()){
+  	  printf("MIPI_Init Init failed!\r\n");
+    }else{
+  	  printf("MIPI_Init Init successfully!\r\n");
+    }
+
+  //   while(1){
+   	    mipi_clear_error();
+  	 	usleep(50*1000);
+   	    mipi_clear_error();
+  	 	usleep(1000*1000);
+  	    mipi_show_error_info();
+  //	    mipi_show_error_info_more();
+  	    printf("\n");
+  //   }
+
+
+  #if 0  // focus sweep
+  	    printf("\nFocus sweep\n");
+   	 	alt_u16 ii= 350;
+   	    alt_u8  dir = 0;
+   	 	while(1){
+   	 		if(ii< 50) dir = 1;
+   	 		else if (ii> 1000) dir =0;
+
+   	 		if(dir) ii += 20;
+   	 		else    ii -= 20;
+
+   	    	printf("%d\n",ii);
+   	     OV8865_FOCUS_Move_to(ii);
+   	     usleep(50*1000);
+   	    }
+  #endif
 
 
 
 
-    //////////////////////////////////////////////////////////
-        alt_u16 bin_level = DEFAULT_LEVEL;
-        alt_u8  manual_focus_step = 10;
-        alt_u16  current_focus = 300;
-    	int boundingBoxColour = 0;
-    	alt_u32 exposureTime = EXPOSURE_INIT;
-    	alt_u16 gain = GAIN_INIT;
-
-        OV8865SetExposure(exposureTime);
-        OV8865SetGain(gain);
-        Focus_Init();
-
-        FILE* ser = fopen("/dev/uart_0", "rb+");
-        if(ser){
-        	printf("Opened UART\n");
-        } else {
-        	printf("Failed to open UART\n");
-        	while (1);
-        }
-
-  while(1){
-
-       // touch KEY0 to trigger Auto focus
-	   if((IORD(KEY_BASE,0)&0x03) == 0x02){
-
-    	   current_focus = Focus_Window(320,240);
-       }
-	   // touch KEY1 to ZOOM
-	         if((IORD(KEY_BASE,0)&0x03) == 0x01){
-	      	   if(bin_level == 3 )bin_level = 1;
-	      	   else bin_level ++;
-	      	   printf("set bin level to %d\n",bin_level);
-	      	   MIPI_BIN_LEVEL(bin_level);
-	      	 	usleep(500000);
-
-	         }
 
 
-	#if 0
-       if((IORD(KEY_BASE,0)&0x0F) == 0x0E){
+      //////////////////////////////////////////////////////////
+          alt_u16 bin_level = DEFAULT_LEVEL;
+          alt_u8  manual_focus_step = 10;
+          alt_u16  current_focus = 300;
+      	int boundingBoxColour = 0;
+      	alt_u32 exposureTime = EXPOSURE_INIT;
+      	alt_u16 gain = GAIN_INIT;
 
-    	   current_focus = Focus_Window(320,240);
-       }
+          OV8865SetExposure(exposureTime);
+          OV8865SetGain(gain);
+          Focus_Init();
 
-       // touch KEY1 to trigger Manual focus  - step
-       if((IORD(KEY_BASE,0)&0x0F) == 0x0D){
+          FILE* ser = fopen("/dev/uart_0", "rb+");
+          if(ser){
+          	printf("Opened UART\n");
+          } else {
+          	printf("Failed to open UART\n");
+          	while (1);
+          }
+    IRQ_init();
+    while(1){
 
-    	   if(current_focus > manual_focus_step) current_focus -= manual_focus_step;
-    	   else current_focus = 0;
-    	   OV8865_FOCUS_Move_to(current_focus);
+         // touch KEY0 to trigger Auto focus
+  	   if((IORD(KEY_BASE,0)&0x03) == 0x02){
 
-       }
+      	   current_focus = Focus_Window(320,240);
+         }
+  	   // touch KEY1 to ZOOM
+  	         if((IORD(KEY_BASE,0)&0x03) == 0x01){
+  	      	   if(bin_level == 3 )bin_level = 1;
+  	      	   else bin_level ++;
+  	      	   printf("set bin level to %d\n",bin_level);
+  	      	   MIPI_BIN_LEVEL(bin_level);
+  	      	 	usleep(500000);
 
-       // touch KEY2 to trigger Manual focus  + step
-       if((IORD(KEY_BASE,0)&0x0F) == 0x0B){
-    	   current_focus += manual_focus_step;
-    	   if(current_focus >1023) current_focus = 1023;
-    	   OV8865_FOCUS_Move_to(current_focus);
-       }
-
-       // touch KEY3 to ZOOM
-       if((IORD(KEY_BASE,0)&0x0F) == 0x07){
-    	   if(bin_level == 3 )bin_level = 1;
-    	   else bin_level ++;
-    	   printf("set bin level to %d\n",bin_level);
-    	   MIPI_BIN_LEVEL(bin_level);
-    	 	usleep(500000);
-
-       }
-	#endif
-
-       //Read messages from the image processor and print them on the terminal
-       while ((IORD(0x42000,EEE_IMGPROC_STATUS)>>8) & 0xff) { 	//Find out if there are words to read
-           int word = IORD(0x42000,EEE_IMGPROC_MSG); 			//Get next word from message buffer
-    	   if (fwrite(&word, 4, 1, ser) != 1)
-    		   printf("Error writing to UART");
-           if (word == EEE_IMGPROC_MSG_START)				//Newline on message identifier
-    		   printf("\n");
-    	   printf("%08x ",word);
-       }
-
-       //Update the bounding box colour
-       boundingBoxColour = ((boundingBoxColour + 1) & 0xff);
-       IOWR(0x42000, EEE_IMGPROC_BBCOL, (boundingBoxColour << 8) | (0xff - boundingBoxColour));
-
-       //Process input commands
-       int in = getchar();
-       switch (in) {
-       	   case 'e': {
-       		   exposureTime += EXPOSURE_STEP;
-       		   OV8865SetExposure(exposureTime);
-       		   printf("\nExposure = %x ", exposureTime);
-       	   	   break;}
-       	   case 'd': {
-       		   exposureTime -= EXPOSURE_STEP;
-       		   OV8865SetExposure(exposureTime);
-       		   printf("\nExposure = %x ", exposureTime);
-       	   	   break;}
-       	   case 't': {
-       		   gain += GAIN_STEP;
-       		   OV8865SetGain(gain);
-       		   printf("\nGain = %x ", gain);
-       	   	   break;}
-       	   case 'g': {
-       		   gain -= GAIN_STEP;
-       		   OV8865SetGain(gain);
-       		   printf("\nGain = %x ", gain);
-       	   	   break;}
-       	   case 'r': {
-        	   current_focus += manual_focus_step;
-        	   if(current_focus >1023) current_focus = 1023;
-        	   OV8865_FOCUS_Move_to(current_focus);
-        	   printf("\nFocus = %x ",current_focus);
-       	   	   break;}
-       	   case 'f': {
-        	   if(current_focus > manual_focus_step) current_focus -= manual_focus_step;
-        	   OV8865_FOCUS_Move_to(current_focus);
-        	   printf("\nFocus = %x ",current_focus);
-       	   	   break;}
-       }
+  	         }
 
 
-	   //Main loop delay
-	   usleep(10000);
+  	#if 0
+         if((IORD(KEY_BASE,0)&0x0F) == 0x0E){
 
-   };
-  return 0;
+      	   current_focus = Focus_Window(320,240);
+         }
+
+         // touch KEY1 to trigger Manual focus  - step
+         if((IORD(KEY_BASE,0)&0x0F) == 0x0D){
+
+      	   if(current_focus > manual_focus_step) current_focus -= manual_focus_step;
+      	   else current_focus = 0;
+      	   OV8865_FOCUS_Move_to(current_focus);
+
+         }
+
+         // touch KEY2 to trigger Manual focus  + step
+         if((IORD(KEY_BASE,0)&0x0F) == 0x0B){
+      	   current_focus += manual_focus_step;
+      	   if(current_focus >1023) current_focus = 1023;
+      	   OV8865_FOCUS_Move_to(current_focus);
+         }
+
+         // touch KEY3 to ZOOM
+         if((IORD(KEY_BASE,0)&0x0F) == 0x07){
+      	   if(bin_level == 3 )bin_level = 1;
+      	   else bin_level ++;
+      	   printf("set bin level to %d\n",bin_level);
+      	   MIPI_BIN_LEVEL(bin_level);
+      	 	usleep(500000);
+
+         }
+  	#endif
+
+         //Read messages from the image processor and print them on the terminal
+         int status=IORD(0x42000,EEE_IMGPROC_STATUS);
+                 printf("status:%08x\n",status);
+                 printf("status shift:%08x\n",status>>8);
+         while ((status>>8) & 0xff) { 	//Find out if there are words to read
+             int word = IORD(0x42000,EEE_IMGPROC_MSG); 			//Get next word from message buffer
+             if (fwrite(&word, 4, 1, ser) != 1)
+            	 printf("Error writing to UART");
+             if (word == EEE_IMGPROC_MSG_START){
+            	 IOWR_ALTERA_AVALON_UART_TXDATA(UART_0_BASE,36);//Newline on message identifier
+            	 printf("\n");
+             }
+
+             while(!(IORD_ALTERA_AVALON_UART_STATUS(UART_0_BASE)& ALTERA_AVALON_UART_STATUS_TRDY_MSK));
+             IOWR_ALTERA_AVALON_UART_TXDATA(UART_0_BASE,word);//发送准备好，发送txdata
+//           IOWR_ALTERA_AVALON_UART_TXDATA(UART_0_BASE,'/n');
+             printf("%08x ",word);
+         }
+
+
+         //Update the bounding box colour
+//         boundingBoxColour = ((boundingBoxColour + 1) & 0xff);
+//         IOWR(0x42000, EEE_IMGPROC_BBCOL, (boundingBoxColour << 8) | (0xff - boundingBoxColour));
+
+         //Process input commands
+         int in = getchar();
+         switch (in) {
+         	   case 'e': {
+         		   exposureTime += EXPOSURE_STEP;
+         		   OV8865SetExposure(exposureTime);
+         		   printf("\nExposure = %x ", exposureTime);
+         	   	   break;}
+         	   case 'd': {
+         		   exposureTime -= EXPOSURE_STEP;
+         		   OV8865SetExposure(exposureTime);
+         		   printf("\nExposure = %x ", exposureTime);
+         	   	   break;}
+         	   case 't': {
+         		   gain += GAIN_STEP;
+         		   OV8865SetGain(gain);
+         		   printf("\nGain = %x ", gain);
+         	   	   break;}
+         	   case 'g': {
+         		   gain -= GAIN_STEP;
+         		   OV8865SetGain(gain);
+         		   printf("\nGain = %x ", gain);
+         	   	   break;}
+         	   case 'r': {
+          	   current_focus += manual_focus_step;
+          	   if(current_focus >1023) current_focus = 1023;
+          	   OV8865_FOCUS_Move_to(current_focus);
+          	   printf("\nFocus = %x ",current_focus);
+         	   	   break;}
+         	   case 'f': {
+          	   if(current_focus > manual_focus_step) current_focus -= manual_focus_step;
+          	   OV8865_FOCUS_Move_to(current_focus);
+          	   printf("\nFocus = %x ",current_focus);
+         	   	   break;}
+         }
+
+
+  	   //Main loop delay
+  	   usleep(10000);
+
+     };
+    return 0;
 }
+

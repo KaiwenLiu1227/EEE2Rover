@@ -474,9 +474,9 @@ void OV8865SetExposure(alt_u32 exposure){
 
 	Focus_Released(); // waiting for VCM release I2C bus
 
-	int bSuccess = oc_i2c_init_ex(I2C_OPENCORES_CAMERA_BASE, 50*1000*1000,400*1000); //I2C: 400K
-	if (!bSuccess)
-		printf("failed to init MIPI- Camera i2c\r\n");
+//	int bSuccess = oc_i2c_init_ex(I2C_OPENCORES_CAMERA_BASE, 50*1000*1000,400*1000); //I2C: 400K
+//	if (!bSuccess)
+//		printf("failed to init MIPI- Camera i2c\r\n");
 
 	if (exposure > 0xFFFFF) exposure = 0xFFFFF;
 	if (exposure < 0x20) exposure = 0x20;
@@ -493,9 +493,9 @@ void OV8865SetGain(alt_u16 gain){
 
 	Focus_Released(); // waiting for VCM release I2C bus
 
-	int bSuccess = oc_i2c_init_ex(I2C_OPENCORES_CAMERA_BASE, 50*1000*1000,400*1000); //I2C: 400K
-	if (!bSuccess)
-		printf("failed to init MIPI- Camera i2c\r\n");
+//	int bSuccess = oc_i2c_init_ex(I2C_OPENCORES_CAMERA_BASE, 50*1000*1000,400*1000); //I2C: 400K
+//	if (!bSuccess)
+//		printf("failed to init MIPI- Camera i2c\r\n");
 
 	if (gain > 0x7FF) gain = 0x7FF;
 	if (gain < 0x080) gain = 0x080;
