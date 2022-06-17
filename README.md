@@ -10,5 +10,7 @@
 
   [Building the FPGA starter project](doc/FPGA-installation.md)
   
+  [Flashing the FPGA for standalone operation](doc/FPGA-flash.md)
+  
   [Starter project documentation](doc/FPGA-system.md)
   
